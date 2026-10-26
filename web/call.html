@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EMI Call Console</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #fff; --line: #e4e7ec; --text: #1d2026; --muted: #6b7280; --soft: #f1f2f5;
+    --brand: #4f46e5; --brand-soft: #eef0ff; --ok: #16a34a; --ok-soft: #e7f6ec; --warn: #b45309; --warn-soft: #fef3c7;
+    --bad: #dc2626; --bad-soft: #fee2e2; --caller: #e8f3ec; --agent: #ffffff; --code: #f6f7f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1015; --panel: #161a22; --line: #262b36; --text: #e7e9ee; --muted: #8c94a3; --soft: #1d222c;
+      --brand: #8b93ff; --brand-soft: #1f2347; --ok-soft: #12291b; --warn-soft: #2e2410; --bad-soft: #2e1515;
+      --caller: #13261b; --agent: #1a1f29; --code: #11141b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px; padding: 8px 18px; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+  button:disabled { opacity: .45; cursor: default; }
+  .call-btn { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .end-btn { background: var(--bad); border-color: var(--bad); color: #fff; }
+
+  /* header: the call card */
+  header { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 14px;
+           padding: 12px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .avatar { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-weight: 600;
+            background: var(--brand-soft); color: var(--brand); transition: box-shadow .15s; flex: none; }
+  .avatar.speaking { box-shadow: 0 0 0 5px color-mix(in srgb, var(--brand) 28%, transparent); }
+  .who { line-height: 1.25; } .who b { display: block; } .who small { color: var(--muted); }
+  .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--soft); border-radius: 999px; padding: 3px 10px; font-size: 12px; white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.live { background: var(--ok); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity: .3 } }
+  .timer { font-variant-numeric: tabular-nums; color: var(--muted); }
+  .spacer { flex: 1; }
+  .outcome { display: none; background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+
+  /* layout */
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; padding: 16px 20px; max-width: 1280px; margin: 0 auto; }
+  @media (max-width: 960px) { .layout { grid-template-columns: 1fr; padding: 12px 16px; } }
+  #chat { display: flex; flex-direction: column; gap: 10px; min-height: calc(100vh - 110px); padding-bottom: 40px; }
+  .empty { margin: 60px auto; max-width: 440px; text-align: center; color: var(--muted); }
+  aside { display: flex; flex-direction: column; gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .card h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 13px; } .kv span:nth-child(odd) { color: var(--muted); }
+
+  /* chat items */
+  .msg { max-width: 78%; border-radius: 14px; padding: 9px 12px; border: 1px solid var(--line); }
+  .msg .head { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .caller { align-self: flex-end; background: var(--caller); border-bottom-right-radius: 4px; min-width: 300px; }
+  .agent { align-self: flex-start; background: var(--agent); border-bottom-left-radius: 4px; }
+  .row { display: grid; grid-template-columns: 54px 1fr auto; gap: 8px; align-items: baseline; padding: 4px 6px; border-radius: 8px; transition: all .2s; }
+  .row .lang { font-size: 11px; color: var(--muted); }
+  .row .live { color: var(--muted); font-style: italic; }
+  .row.resolved { background: var(--panel); outline: 2px solid var(--ok); }
+  .row.dim { opacity: .45; }
+  .badge { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: var(--ok); color: #fff; }
+  .meta { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .mic { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); animation: pulse 1s infinite; }
+  .spoken { white-space: pre-wrap; }
+  .tokens { margin-top: 6px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); white-space: pre-wrap; }
+  .tokens .tok { background: var(--brand-soft); border-radius: 3px; }
+  .tokens.streaming::after { content: "▍"; animation: pulse 1s infinite; }
+  .cut { margin-top: 6px; font-size: 12px; color: var(--warn); background: var(--warn-soft); border-radius: 6px; padding: 3px 8px; }
+  .tag { font-size: 10px; padding: 0 6px; border-radius: 4px; background: var(--soft); color: var(--muted); }
+  .tool { align-self: flex-start; max-width: 78%; border-left: 3px solid var(--brand); }
+  .tool .title { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+  .tool pre { margin: 6px 0 0; background: var(--code); border-radius: 6px; padding: 6px 8px; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+  .spinner { width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--brand); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg) } }
+  .sys { align-self: center; font-size: 12px; color: var(--muted); background: var(--soft); border-radius: 999px; padding: 4px 12px; }
+  .sys.vm { background: var(--warn-soft); color: var(--warn); } .sys.switch { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+  .sys.err { background: var(--bad-soft); color: var(--bad); }
+  .outcome-card { align-self: center; background: var(--brand-soft); color: var(--brand); border-radius: 12px; padding: 10px 18px; font-weight: 600; text-align: center; }
+  .lat { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .lat span { font-size: 11px; background: var(--soft); border-radius: 999px; padding: 1px 7px; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font: 12px ui-monospace, Menlo, monospace; }
+  td, th { padding: 3px 4px; text-align: right; border-bottom: 1px solid var(--line); } td:first-child, th:first-child { text-align: left; }
+  .views { display: flex; gap: 4px; padding: 10px 20px 0; max-width: 1280px; margin: 0 auto; }
+  .views button { border-radius: 5px 5px 0 0; padding: 7px 14px; background: transparent; }
+  .views button.active { background: var(--panel); border-bottom-color: var(--panel); font-weight: 600; }
+  [hidden] { display: none !important; }
+  .history { max-width: 1280px; margin: 0 auto; padding: 16px 20px; }
+  .history-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .history-head h1 { font-size: 19px; margin: 0 auto 0 0; }
+  select { min-width: min(340px, 100%); max-width: 100%; font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; }
+  .history-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, .8fr); gap: 14px; align-items: start; }
+  .history-stack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+  .metric { border-left: 2px solid var(--brand); padding: 6px 10px; background: var(--soft); min-width: 0; }
+  .metric small { display: block; color: var(--muted); }
+  .metric b { display: block; font-size: 16px; overflow-wrap: anywhere; }
+  .audio-wrap audio { width: 100%; margin-top: 6px; }
+  .scroll-table { overflow-x: auto; }
+  .turn-table { min-width: 880px; }
+  .turn-table td { vertical-align: top; }
+  .turn-table td:nth-child(2) { text-align: left; min-width: 240px; white-space: normal; font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .turn-table th:first-child, .turn-table td:first-child { text-align: left; }
+  .turn-table button { border-radius: 4px; padding: 3px 7px; font-size: 11px; white-space: nowrap; }
+  .transcript { display: flex; flex-direction: column; gap: 8px; max-height: 560px; overflow: auto; }
+  .transcript-line { border-left: 3px solid var(--line); padding: 6px 9px; overflow-wrap: anywhere; }
+  .transcript-line.user { border-color: var(--ok); }
+  .transcript-line.assistant { border-color: var(--brand); }
+  .transcript-line small { display: block; color: var(--muted); text-transform: capitalize; }
+  .detail-list { display: flex; flex-direction: column; gap: 8px; }
+  .detail-item { border-bottom: 1px solid var(--line); padding-bottom: 8px; overflow-wrap: anywhere; }
+  .detail-item:last-child { border-bottom: 0; }
+  .detail-item b { display: block; }
+  .detail-item pre { margin: 5px 0 0; padding: 7px; max-height: 180px; overflow: auto; background: var(--code); border-radius: 4px; white-space: pre-wrap; word-break: break-word; font-size: 11px; }
+  .empty-history { color: var(--muted); padding: 30px 10px; text-align: center; }
+  @media (max-width: 760px) {
+    .history { padding: 12px; }
+    .views { padding-inline: 12px; }
+    .history-grid { grid-template-columns: 1fr; }
+    .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .history-head h1 { width: 100%; }
+    .history-head select { flex: 1; min-width: 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="avatar" id="avatar">A</div>
+  <div class="who"><b>Asha · Sahayak Finance</b><small>AI collections assistant · this call is recorded</small></div>
+  <span class="chip" role="status" aria-live="polite"><span class="dot" id="dot"></span><span id="status">Ready</span></span>
+  <span class="chip" title="Language the agent is speaking">🗣 <b id="lang">हिंदी</b></span>
+  <span class="chip outcome" id="outcome"></span>
+  <span class="spacer"></span>
+  <span class="timer" id="timer">00:00</span>
+  <button class="call-btn" id="callBtn">Call</button>
+  <button id="muteBtn" disabled aria-pressed="false">Mute</button>
+  <button class="end-btn" id="endBtn" disabled>End</button>
+  <audio id="botAudio" autoplay></audio>
+</header>
+
+<nav class="views" aria-label="Call views">
+  <button class="active" id="liveTab" type="button">Live call</button>
+  <button id="historyTab" type="button">Call history</button>
+</nav>
+
+<section id="liveView">
+<div class="layout">
+  <main id="chat" aria-live="polite">
+    <div class="empty" id="empty">
+      <p><b>Click Call</b> and say "hello" (or stay silent): Asha greets you in Hindi.</p>
+      <p>Say <b>Rahul</b> to pass identity, then try "I already paid", "next Friday", "wrong number", or switch to English.
+         Interrupt her any time.</p>
+    </div>
+  </main>
+  <aside>
+    <div class="card"><h3>Customer (synthetic)</h3>
+      <div class="kv"><span>Name</span><span>Rahul Sharma</span><span>Loan</span><span>LN-88213</span>
+        <span>EMI</span><span>₹4,500 · due 10 Oct</span><span>Preferred</span><span>Hindi</span></div></div>
+    <div class="card"><h3>Latency per turn (ms)</h3>
+      <table><thead><tr><th>#</th><th>Reply</th><th>STT</th><th>LID</th><th>Endpt</th><th>LLM TTFT</th><th>TTS TTFB</th><th>Total</th></tr></thead><tbody id="lat"></tbody></table>
+      <div class="meta">Each stage on its own: STT = end of speech → final; LID = final → resolved transcript; Endpt = end of speech → turn end; LLM TTFT = request → first token; TTS TTFB = request → first audio; Total = end of speech → Asha speaks.</div></div>
+    <div class="card"><h3>How to read this</h3>
+      <div class="meta" style="margin:0">Caller bubbles stream both recognisers live; the highlighted row is the transcript
+        sent to the LLM. Agent bubbles show what was spoken; the grey line under it is the LLM's raw token stream.</div></div>
+  </aside>
+</div>
+</section>
+
+<section class="history" id="historyView" hidden>
+  <div class="history-head">
+    <h1>Call history</h1>
+    <label for="historyCall">Conversation</label>
+    <select id="historyCall"><option value="">Loading calls…</option></select>
+    <button id="refreshHistory" type="button" title="Refresh saved calls">Refresh</button>
+  </div>
+  <div class="empty-history" id="historyEmpty">Select a saved conversation to inspect its recording and call analysis.</div>
+  <div id="historyDetail" hidden>
+    <div class="metrics" id="historyMetrics"></div>
+    <div class="history-grid">
+      <div class="history-stack">
+        <div class="card audio-wrap">
+          <h3>Call recording · caller left / agent right</h3>
+          <audio id="historyAudio" controls preload="none"></audio>
+          <div class="meta" id="audioMeta">Choose a turn below to seek to its audio position.</div>
+        </div>
+        <div class="card">
+          <h3>Turn analysis · select Play to hear from speech end</h3>
+          <div class="scroll-table"><table class="turn-table">
+            <thead><tr><th>Turn</th><th>Caller transcript</th><th>Reply</th><th>STT</th><th>LID</th><th>Endpoint</th><th>LLM TTFT</th><th>TTS TTFB</th><th>Total</th><th>Tools</th><th>Audio</th></tr></thead>
+            <tbody id="historyTurns"></tbody>
+          </table></div>
+        </div>
+        <div class="card">
+          <h3>Conversation transcript</h3>
+          <div class="transcript" id="historyTranscript"></div>
+        </div>
+      </div>
+      <div class="history-stack">
+        <div class="card"><h3>Tool calls</h3><div class="detail-list" id="historyTools"></div></div>
+        <div class="card"><h3>Language decisions</h3><div class="detail-list" id="historyLanguages"></div></div>
+        <div class="card"><h3>Voicemail analysis</h3><div class="detail-list" id="historyVoicemail"></div></div>
+        <div class="card"><h3>Latency summary · median / P90 (ms)</h3><div class="scroll-table"><table><thead><tr><th>Stage</th><th>Turns</th><th>Median</th><th>P90</th></tr></thead><tbody id="historyLatencySummary"></tbody></table></div></div>
+        <div class="card"><h3>Call summary</h3><div class="kv" id="historySummary"></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const LANG = { 'hi-IN': 'हिंदी', 'en-IN': 'English', hi: 'हिंदी', en: 'English' };
+let pc, dc, mic, t0, timerId, caller = null, agent = null, hangup = null, lastCut = null;
+let responseTurns = [], outputTurn = null;
+const tools = {};
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const json = (o) => esc(typeof o === 'string' ? o : JSON.stringify(o, null, 2));
+const el = (cls, html) => { const d = document.createElement('div'); d.className = cls; d.innerHTML = html; return d; };
+function add(node, turn = null) {
+  $('empty')?.remove();
+  if (turn == null) $('chat').append(node);
+  else {
+    node.dataset.turn = turn;
+    const next = [...$('chat').children].find((item) => Number(item.dataset.turn) > turn);
+    $('chat').insertBefore(node, next || null);
+  }
+  node.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  return node;
+}
+function setStatus(t, live = true) { $('status').textContent = t; $('dot').classList.toggle('live', live); }
+const sys = (text, cls = '', turn = null) => add(el(`sys ${cls}`, esc(text)), turn);
+function responseTurn() {
+  if (outputTurn == null) outputTurn = responseTurns.shift() ?? null;
+  return outputTurn;
+}
+
+/* caller bubble: both recognisers live, then the resolved one highlighted */
+function callerBubble() {
+  if (caller) return caller;
+  const node = add(el('msg caller', `<div class="head"><span class="mic"></span><span>You · listening</span></div>
+    ${['hi-IN', 'en-IN'].map((l) => `<div class="row" data-lang="${l}"><span class="lang">${LANG[l]}</span><span><span class="final"></span> <span class="live"></span></span><span></span></div>`).join('')}
+    <div class="meta"></div>`));
+  return (caller = { node, row: (l) => node.querySelector(`.row[data-lang="${l}"]`) });
+}
+function onAsr(d) {
+  const row = callerBubble().row(d.lang); if (!row) return;
+  if (d.final) { row.querySelector('.final').textContent += (row.querySelector('.final').textContent ? ' ' : '') + d.text; row.querySelector('.live').textContent = ''; }
+  else row.querySelector('.live').textContent = d.text;
+}
+function onTurn(d) {
+  const c = callerBubble(), resolved = d.resolved === 'en' ? 'en-IN' : 'hi-IN';
+  for (const l of ['hi-IN', 'en-IN']) {
+    const row = c.row(l);
+    row.querySelector('.final').textContent = d.total_results?.[l] || '—';
+    row.querySelector('.live').textContent = '';
+    row.classList.toggle('resolved', l === resolved); row.classList.toggle('dim', l !== resolved);
+    row.lastElementChild.innerHTML = l === resolved ? '<span class="badge">→ LLM</span>' : '';
+  }
+  c.node.querySelector('.head').innerHTML = `<span>You · turn ${d.turn}</span>`;
+  add(c.node, d.turn);
+  responseTurns.push(d.turn);
+  c.node.querySelector('.meta').textContent =
+    `${LANG[d.resolved]} · ${d.source || d.skip_reason || ''} · ${d.decision}: ${d.reason}${d.lid_ms ? ` · LID ${d.lid_ms} ms` : ''}`;
+  $('lang').textContent = LANG[d.resolved];
+  if (d.switched) sys(`Switched to ${LANG[d.resolved]}: the reply comes in ${LANG[d.resolved]}`, 'switch', d.turn);
+  caller = null;
+}
+
+/* agent bubble: what was spoken, with the LLM token stream underneath */
+function agentBubble(source) {
+  if (agent) return agent;
+  const node = add(el('msg agent', `<div class="head"><b>Asha</b><span class="tag">${source}</span></div>
+    <div class="spoken"></div><div class="tokens" hidden></div><div class="lat"></div>`), responseTurn());
+  return (agent = { node, spoken: node.querySelector('.spoken'), tokens: node.querySelector('.tokens') });
+}
+function closeAgent() { if (agent) agent.tokens.classList.remove('streaming'); agent = null; }
+
+function onMessage(e) {
+  let m; try { m = JSON.parse(e.data); } catch { return; }
+  if (m.label !== 'rtvi-ai') return;
+  const d = m.data || {};
+  switch (m.type) {
+    case 'bot-ready': setStatus('Checking: human or voicemail…'); break;
+    case 'user-started-speaking': setStatus('You are speaking'); callerBubble(); break;
+    case 'user-stopped-speaking': setStatus('Thinking…'); break;
+    case 'bot-started-speaking': setStatus('Asha is speaking'); $('avatar').classList.add('speaking'); break;
+    case 'bot-stopped-speaking':
+      setStatus('Listening'); $('avatar').classList.remove('speaking'); closeAgent(); outputTurn = null;
+      if (hangup) endByAgent(); break;
+    case 'bot-interrupted':
+      if (agent) lastCut = agent.node.appendChild(el('cut', '✂ You interrupted: only the words above (what you heard) stay in the LLM context'));
+      closeAgent(); break;
+    case 'bot-llm-started': { const a = agentBubble('LLM'); a.tokens.hidden = false; a.tokens.classList.add('streaming'); break; }
+    case 'bot-llm-text': {
+      const a = agentBubble('LLM'); a.tokens.hidden = false;
+      const s = document.createElement('span'); s.className = 'tok'; s.textContent = d.text; a.tokens.append(s);
+      setTimeout(() => s.classList.remove('tok'), 500); break;
+    }
+    case 'bot-llm-stopped': agent?.tokens.classList.remove('streaming'); if (agent && !agent.tokens.textContent) agent.tokens.hidden = true; break;
+    case 'bot-tts-text': { const a = agentBubble('scripted / tool'); a.spoken.textContent += (a.spoken.textContent ? ' ' : '') + d.text; break; }
+    case 'llm-function-call-in-progress': {
+      closeAgent();
+      tools[d.tool_call_id] = add(el('card tool', `<div class="title"><span class="spinner"></span>🔧 ${esc(d.function_name)}</div><pre>${json(d.arguments)}</pre>`), responseTurn());
+      break;
+    }
+    case 'llm-function-call-stopped': {
+      const card = tools[d.tool_call_id]; if (!card) break;
+      card.querySelector('.spinner')?.replaceWith(Object.assign(document.createElement('span'), { textContent: d.cancelled ? '✗' : '✓' }));
+      card.insertAdjacentHTML('beforeend', d.cancelled ? '<pre>cancelled (you interrupted)</pre>' : `<pre>→ ${json(d.result)}</pre>`);
+      break;
+    }
+    case 'user-mute-started': sys('Greeting plays in full (initial_message_barge=false): you are muted until it ends'); break;
+    case 'server-message': onServer(d.kind, d.data || {}); break;
+    case 'error': sys(`Error: ${d.error || JSON.stringify(d)}`, 'err'); break;
+  }
+}
+
+function onServer(kind, d) {
+  if (kind === 'asr') onAsr(d);
+  else if (kind === 'interruption') {
+    const html = `✂ You interrupted. <b>Heard:</b> “${esc(d.heard) || '—'}” · <b>Missed:</b> “${esc(d.missed)}”<br>The LLM was told what you missed, so its next reply covers anything important.`;
+    if (lastCut) lastCut.innerHTML = html; else sys(`Interrupted: missed “${d.missed}”`);
+    lastCut = null;
+  }
+  else if (kind === 'turn') onTurn(d);
+  else if (kind === 'voicemail') {
+    sys(d.kind === 'human' ? `Voicemail check: human (${d.reason}, ${d.decided_at_s}s)` : `Voicemail detected: ${d.reason}`, d.kind === 'human' ? '' : 'vm');
+    setStatus(d.kind === 'human' ? 'Greeting…' : 'Leaving voicemail message');
+    if (caller) { caller.node.querySelector('.head').innerHTML = '<span>Before the decision (not sent to the LLM)</span>'; caller = null; }
+  } else if (kind === 'disposition') {
+    const text = `Outcome: ${d.disposition.replaceAll('_', ' ')}${d.promise_date ? ` · ${d.promise_date} · ${d.reference_id}` : ''}${d.callback_time ? ` · call back: ${d.callback_time}` : ''}`;
+    add(el('outcome-card', esc(text) + (d.message ? `<div class="meta">${esc(d.message)}</div>` : '')), responseTurn());
+    $('outcome').textContent = text; $('outcome').style.display = 'inline-flex';
+    // The server ends the call after the closing line, but browsers notice a closed WebRTC peer only after ~30 s,
+    // so hang up here once Asha stops speaking (safety timer in case no speech follows).
+    hangup = setTimeout(endByAgent, 20000);
+  } else if (kind === 'latency') {
+    const v = (x) => (x == null ? '–' : x);
+    if (d.response_status === 'no_response') {
+      responseTurns = responseTurns.filter((turn) => turn !== d.turn);
+      if (outputTurn === d.turn) outputTurn = null;
+    }
+    const row = document.createElement('tr');
+    row.dataset.turn = d.turn;
+    row.innerHTML = `<td>${esc(d.turn)}</td><td>${esc(d.response_status || 'spoken')}</td><td>${v(d.stt_ms)}</td><td>${v(d.lid_ms)}</td>
+      <td>${v(d.endpoint_ms)}</td><td>${v(d.llm_ttft_ms)}</td><td>${v(d.tts_ttfb_ms)}</td><td>${v(d.total_ms)}</td>`;
+    const nextRow = [...$('lat').rows].find((item) => Number(item.dataset.turn) > d.turn);
+    $('lat').insertBefore(row, nextRow || null);
+    const target = [...$('chat').querySelectorAll('.msg.agent')]
+      .find((node) => Number(node.dataset.turn) === d.turn)?.querySelector('.lat');
+    if (target) target.innerHTML = [['STT', d.stt_ms], ['LID', d.lid_ms], ['endpoint', d.endpoint_ms], ['LLM TTFT', d.llm_ttft_ms],
+      ['TTS TTFB', d.tts_ttfb_ms], ['total', d.total_ms]].filter(([, x]) => x != null).map(([k, x]) => `<span>${k} ${x} ms</span>`).join('');
+  }
+}
+
+const duration = (value) => {
+  const seconds = Math.max(0, Math.floor(Number(value) || 0));
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+};
+const timeLabel = (value) => value ? new Date(value).toLocaleString() : '—';
+const metric = (label, value) => `<div class="metric"><small>${esc(label)}</small><b>${esc(value ?? '—')}</b></div>`;
+const detailItem = (title, detail) => `<div class="detail-item"><b>${esc(title)}</b>${detail ? `<pre>${json(detail)}</pre>` : ''}</div>`;
+
+async function loadHistory(selectId = '') {
+  const select = $('historyCall');
+  $('refreshHistory').disabled = true;
+  try {
+    const response = await fetch('/api/calls');
+    if (!response.ok) throw new Error(`Could not load calls (${response.status})`);
+    const calls = await response.json();
+    select.innerHTML = calls.length ? calls.map((call) => `<option value="${esc(call.call_id)}">${esc(call.call_id)} · ${esc(call.disposition || 'in progress')} · ${esc(timeLabel(call.started_at))}</option>`).join('') : '<option value="">No saved calls</option>';
+    const chosen = calls.some((call) => call.call_id === selectId) ? selectId : calls[0]?.call_id || '';
+    select.value = chosen;
+    if (chosen) await loadCallHistory(chosen);
+    else {
+      $('historyDetail').hidden = true;
+      $('historyEmpty').hidden = false;
+      $('historyEmpty').textContent = 'No saved calls yet. Completed calls will appear here.';
+    }
+  } catch (error) {
+    select.innerHTML = '<option value="">Call history unavailable</option>';
+    $('historyDetail').hidden = true;
+    $('historyEmpty').hidden = false;
+    $('historyEmpty').textContent = error.message;
+  } finally { $('refreshHistory').disabled = false; }
+}
+
+async function loadCallHistory(callId) {
+  if (!callId) return;
+  $('historyEmpty').hidden = true;
+  $('historyDetail').hidden = true;
+  try {
+    const response = await fetch(`/api/calls/${encodeURIComponent(callId)}`);
+    if (!response.ok) throw new Error(`Could not load conversation (${response.status})`);
+    const call = await response.json();
+    renderCallHistory(call);
+  } catch (error) {
+    $('historyEmpty').hidden = false;
+    $('historyEmpty').textContent = error.message;
+  }
+}
+
+function renderCallHistory(call) {
+  const turns = call.turns || [];
+  const toolsList = call.tools || turns.flatMap((turn) => (turn.tools || []).map((name) => ({
+    turn: turn.turn, name, arguments: null, result: null, at: null,
+  })));
+  const switches = Math.max(0, (call.language_timeline || []).length - 1);
+  const durationSeconds = call.summary?.duration_s ?? (Date.parse(call.ended_at) - Date.parse(call.started_at)) / 1000;
+  $('historyMetrics').innerHTML = [
+    metric('Disposition', (call.disposition || 'unknown').replaceAll('_', ' ')),
+    metric('Duration', `${duration(durationSeconds)}`),
+    metric('Turns', call.summary?.turn_count ?? turns.length),
+    metric('Tool calls', call.summary?.tool_call_count ?? toolsList.length),
+    metric('Language switches', call.summary?.language_switch_count ?? switches),
+    metric('Recording', call.audio?.format?.toUpperCase() || (call.recording ? 'WAV' : 'Unavailable')),
+    metric('Started', timeLabel(call.started_at)),
+    metric('Ended', timeLabel(call.ended_at)),
+  ].join('');
+
+  const audio = $('historyAudio');
+  audio.pause();
+  audio.removeAttribute('src');
+  if (call.recording || call.audio) {
+    audio.src = `/api/calls/${encodeURIComponent(call.call_id)}/audio`;
+    $('audioMeta').textContent = `${call.audio?.sample_rate ? `${call.audio.sample_rate} Hz · ` : ''}${call.audio?.channels || 2} channels · stereo recording`;
+  } else {
+    $('audioMeta').textContent = 'No recording is available for this conversation.';
+  }
+
+  $('historyTurns').innerHTML = turns.length ? turns.map((turn) => {
+    const turnTools = toolsList.filter((item) => item.turn === turn.turn).map((item) => item.name);
+    const value = (name) => turn[name] == null ? '—' : esc(turn[name]);
+    return `<tr><td>${esc(turn.turn)}</td><td>${esc(turn.text || 'Transcript not available')}</td><td>${esc(turn.response_status || 'spoken')}</td><td>${value('stt_ms')}</td><td>${value('lid_ms')}</td><td>${value('endpoint_ms')}</td><td>${value('llm_ttft_ms')}</td><td>${value('tts_ttfb_ms')}</td><td>${value('total_ms')}</td><td>${esc(turnTools.join(', ') || '—')}</td><td>${turn.audio_offset_s == null ? '—' : `<button type="button" data-audio-offset="${esc(turn.audio_offset_s)}">Play</button>`}</td></tr>`;
+  }).join('') : '<tr><td colspan="11">No completed turns were recorded.</td></tr>';
+
+  const transcript = call.transcript?.length ? call.transcript : turns.filter((turn) => turn.text)
+    .map((turn) => ({ role: 'user', text: turn.text, turn: turn.turn }));
+  $('historyTranscript').innerHTML = transcript.length
+    ? transcript.map((line) => `<div class="transcript-line ${esc(line.role)}"><small>${esc(line.role)}${line.turn ? ` · turn ${esc(line.turn)}` : ''}</small>${esc(line.text)}</div>`).join('')
+    : '<div class="meta">Transcript was not saved for this call.</div>';
+  $('historyTools').innerHTML = toolsList.length
+    ? toolsList.map((item) => detailItem(`Turn ${item.turn} · ${item.name} · ${timeLabel(item.at)}`, { arguments: item.arguments, result: item.result })).join('')
+    : '<div class="meta">No tool calls recorded.</div>';
+  $('historyLanguages').innerHTML = (call.language_decisions || []).length
+    ? call.language_decisions.map((item) => detailItem(`Turn ${item.turn} · ${item.decision} · ${item.resolved || item.lang || ''}`, item)).join('')
+    : (call.language_timeline || []).map((item) => detailItem(`Turn ${item.turn} · ${item.lang}`, item.reason)).join('') || '<div class="meta">No language decisions recorded.</div>';
+  $('historyVoicemail').innerHTML = call.voicemail
+    ? detailItem(`${call.voicemail.kind} · ${call.voicemail.reason}`, call.voicemail.signals || { decided_at_s: call.voicemail.decided_at_s })
+    : '<div class="meta">No voicemail decision recorded.</div>';
+  const stages = Object.entries(call.latency_summary || {});
+  $('historyLatencySummary').innerHTML = stages.length ? stages.map(([stage, values]) =>
+    `<tr><td>${esc(stage)}</td><td>${esc(values.n)}</td><td>${esc(values.median)}</td><td>${esc(values.p90)}</td></tr>`).join('')
+    : '<tr><td colspan="4">No latency samples recorded.</td></tr>';
+  $('historySummary').innerHTML = [
+    ['Call ID', call.call_id], ['Customer ID', call.customer_id], ['Disposition details', call.disposition_details],
+    ['Audio duration', call.audio?.duration_s == null ? '—' : `${call.audio.duration_s} s`],
+    ['Sample rate', call.audio?.sample_rate ? `${call.audio.sample_rate} Hz` : '—'],
+  ].map(([key, value]) => `<span>${esc(key)}</span><span>${esc(typeof value === 'object' ? JSON.stringify(value) : value ?? '—')}</span>`).join('');
+  $('historyDetail').hidden = false;
+}
+
+function showView(name) {
+  const history = name === 'history';
+  $('liveView').hidden = history;
+  $('historyView').hidden = !history;
+  $('liveTab').classList.toggle('active', !history);
+  $('historyTab').classList.toggle('active', history);
+  if (history) loadHistory($('historyCall').value);
+}
+
+$('liveTab').onclick = () => showView('live');
+$('historyTab').onclick = () => showView('history');
+$('refreshHistory').onclick = () => loadHistory($('historyCall').value);
+$('historyCall').onchange = () => loadCallHistory($('historyCall').value);
+  $('historyTurns').onclick = async (event) => {
+  const button = event.target.closest('[data-audio-offset]');
+  if (!button) return;
+  const audio = $('historyAudio'), offset = Number(button.dataset.audioOffset);
+  if (!Number.isFinite(offset)) return;
+  audio.currentTime = Math.min(offset, Number.isFinite(audio.duration) ? audio.duration : offset);
+  try { await audio.play(); } catch { $('audioMeta').textContent = 'Press Play in the recording controls to begin playback.'; }
+};
+
+async function startCall() {
+  $('callBtn').disabled = true; setStatus('Connecting…'); $('timer').textContent = '00:00';
+  $('chat').innerHTML = ''; $('lat').innerHTML = ''; $('outcome').style.display = 'none'; caller = agent = null;
+  responseTurns = []; outputTurn = null;
+  for (const id of Object.keys(tools)) delete tools[id];
+  clearTimeout(hangup); hangup = null;
+  try {
+    mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    pc = new RTCPeerConnection({ iceServers: [] });  // local only: host candidates, no STUN wait
+    dc = pc.createDataChannel('rtvi', { ordered: true });
+    dc.onopen = () => dc.send(JSON.stringify({ label: 'rtvi-ai', type: 'client-ready', id: crypto.randomUUID(),
+      data: { version: '2.2.0', about: { library: 'emi-call-console', library_version: '0.2.0', platform: 'browser' } } }));
+    dc.onmessage = onMessage;
+    mic.getAudioTracks().forEach((t) => pc.addTrack(t, mic));
+    pc.ontrack = (e) => { $('botAudio').srcObject = e.streams[0] || new MediaStream([e.track]); };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected') {
+        t0 = performance.now(); setStatus('Connected');
+        timerId = setInterval(() => { const s = Math.floor((performance.now() - t0) / 1000);
+          $('timer').textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; }, 500);
+        $('muteBtn').disabled = $('endBtn').disabled = false;
+      }
+      if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) stopCall(false);
+    };
+    await pc.setLocalDescription(await pc.createOffer());
+    await new Promise((res) => { if (pc.iceGatheringState === 'complete') return res();
+      pc.onicegatheringstatechange = () => pc.iceGatheringState === 'complete' && res(); setTimeout(res, 2000); });
+    const r = await fetch('/api/offer', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type }) });
+    if (!r.ok) throw new Error(`offer failed: HTTP ${r.status}`);
+    await pc.setRemoteDescription(await r.json());
+  } catch (err) { sys(`Error: ${err.message || err}`, 'err'); stopCall(false); }
+}
+
+function endByAgent() { clearTimeout(hangup); hangup = null; if (pc || mic) { sys('Asha ended the call'); stopCall(false); } }
+
+function stopCall(bye = true) {
+  if (!pc && !mic) return;
+  if (bye && dc?.readyState === 'open') dc.send(JSON.stringify({ label: 'rtvi-ai', type: 'disconnect-bot', id: crypto.randomUUID(), data: {} }));
+  clearInterval(timerId);
+  const p = pc; pc = null; setTimeout(() => p?.close(), bye ? 300 : 0);
+  mic?.getTracks().forEach((t) => t.stop()); mic = null;
+  setStatus('Call ended', false); $('avatar').classList.remove('speaking'); closeAgent();
+  $('callBtn').disabled = false; $('muteBtn').disabled = $('endBtn').disabled = true;
+  $('muteBtn').textContent = 'Mute'; $('muteBtn').setAttribute('aria-pressed', 'false');
+}
+
+$('callBtn').onclick = startCall;
+$('endBtn').onclick = () => stopCall(true);
+$('muteBtn').onclick = () => {
+  const track = mic?.getAudioTracks()[0]; if (!track) return;
+  track.enabled = !track.enabled;
+  $('muteBtn').textContent = track.enabled ? 'Mute' : 'Unmute'; $('muteBtn').setAttribute('aria-pressed', String(!track.enabled));
+};
+</script>
+</body>
+</html>

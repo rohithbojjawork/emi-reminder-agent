@@ -1,0 +1,10 @@
+.env
+.DS_Store
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+data/
+recordings/*.wav
+recordings/*.json
+*_take_home_task.pdf
