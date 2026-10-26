@@ -11,7 +11,7 @@ CUSTOMER = {
     'phone': '+91XXXXXXXXXX',
     'loan_id': 'LN-88213',
     'emi_amount_inr': 4500,
-    'due_date': date(2026, 10, 10),
+    'due_date': date(2026, 10, 26),
     'preferred_language': 'hi',
     'lender': 'Sahayak Finance',  # fictional lender
 }
